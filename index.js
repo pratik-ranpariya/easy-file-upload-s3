@@ -2,21 +2,43 @@ const multer = require('multer');
 const multerS3 = require('multer-s3');
 const aws = require('aws-sdk');
 const path = require('path');
-const { http_codes, messages, errorStatus } = require('../constant/index.constant');
-const { error } = require('../common/res.common')
-const { s3: s3cred, bucketName, bucketUrl } = require('./../common/s3.common')
+const { v4: uuidv4 } = require('uuid');
+// const { http_codes, messages, errorStatus } = require('../constant/index.constant');
 
-aws.config.update(s3cred);
-const FileUpload = (req, res, next) => {
+const FileUpload = (req, res, s3credential, next) => {
+    const { region, secretAccessKey, accessKeyId, bucketName, bucketUrl = '', videoPrefix = '', imagePrefix = '', documentPrefix = '' } = s3credential
+    if(!(region && secretAccessKey && accessKeyId && bucketName && bucketUrl)){
+        if(region){
+            return 'region must be required'
+        } else if(secretAccessKey){
+            return 'secretAccessKey must be required'
+        } else if(accessKeyId){
+            return 'accessKeyId must be required'
+        } else if(bucketName){
+            return 'bucketName must be required'
+        }
+    }
+
+    var s3cred = {
+        accessKeyId: accessKeyId,
+        secretAccessKey: secretAccessKey,
+        region: region,
+        bucket: bucketName
+    }
+
+    aws.config.update(s3cred);
     req.video_upload = {};
     req.image_upload = {};
     req.document_upload = {}
+    req.creds3 = s3credential
     upload(req, res, async function (err) {
         if (err) {
             console.log(err);
-            return error(http_codes.internalError,  messages.imgNotUpload, errorStatus.imgNotUpload, res)
+            return err
+            // return error(http_codes.internalError,  messages.imgNotUpload, errorStatus.imgNotUpload, res)
         } else {
             next()
+            return req
         }
     })
 }
@@ -29,7 +51,7 @@ const storage = multerS3({
         cb(null, { fieldName: file.fieldname });
     },
     key: function (req, file, cb) {
-        
+        const { bucketUrl = '', videoPrefix = '', imagePrefix = '', documentPrefix = '' } = req.creds3
         if( file.mimetype == 'video/mp4' || 
             file.mimetype == 'video/quicktime' || 
             file.mimetype == 'video/x-sgi-movie' || 
@@ -37,8 +59,7 @@ const storage = multerS3({
             if(req.video_upload[file.fieldname] == undefined){
                 req.video_upload[file.fieldname] = []
             }
-            let folder = 'uploads/video/_'+Date.now()+'/';
-            var file_name = folder + 'video__' + Date.now()+ '_' + parseInt(Math.random()*543541516845) + path.extname(file.originalname);
+            var file_name = videoPrefix + uuidv4() + path.extname(file.originalname);
             req.video_upload[file.fieldname].push(bucketUrl+file_name)
 
         } else if( file.mimetype == 'image/gif' || 
@@ -49,17 +70,16 @@ const storage = multerS3({
             if(req.image_upload[file.fieldname] == undefined){
                 req.image_upload[file.fieldname] = []
             }
-            let folder = 'uploads/image/';
-            var file_name = folder + 'image__' + Date.now()+ '_' + parseInt(Math.random()*543541516845) + path.extname(file.originalname);
+            var file_name = imagePrefix + uuidv4() + path.extname(file.originalname);
             req.image_upload[file.fieldname].push(bucketUrl+file_name)
         } else {
             if(req.document_upload[file.fieldname] == undefined){
                 req.document_upload[file.fieldname] = []
             }
-            let folder = 'uploads/document/';
-            var file_name = folder + 'document__' + Date.now()+ '_' + parseInt(Math.random()*543541516845) + path.extname(file.originalname);
+            var file_name = documentPrefix + uuidv4() + path.extname(file.originalname);
             req.document_upload[file.fieldname].push(bucketUrl+file_name)
         }
+        delete req.creds3
         cb(null, file_name);
     }
 })
